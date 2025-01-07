@@ -448,12 +448,12 @@ isLaunchingBrowser = true; // Mark that we're launching a browser
                       children: [
                         ElevatedButton(
                           onPressed: _loginWithGoogle,
-                          child: const Text('Login/Register with Google'),
+                          child: const Text('Continue with Google'),
                         ),
                         const SizedBox(height: 8),
                         ElevatedButton(
                           onPressed: _loginWithApple,
-                          child: const Text('Login/Register with Apple'),
+                          child: const Text('Continue with Apple'),
                         ),
                         const SizedBox(height: 8),
                        ElevatedButton(
@@ -873,7 +873,9 @@ int? credits;
       {'path': 'assets/images/image2.png', 'route': '/merge-faces'},
 
       {'path': 'assets/images/image4.gif', 'route': '/img2vid'},
+      {'path': 'assets/images/image3.png', 'route': '/txt2img'},
 
+      {'path': 'assets/images/image1.png', 'route': '/img2img'},
     ];
 
     return GridView.builder(
