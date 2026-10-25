@@ -15,7 +15,6 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'package:flutter/services.dart'; // Add this import
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -34,16 +33,16 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Login Demo',
+      title: 'Ai Maker',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-       home: const LoginPage(), // Default home page
+       home: const HomePage(), // Default home page
        scaffoldMessengerKey: scaffoldMessengerKey,
       navigatorObservers: [routeObserver], // Route observer
       routes: {
-        '/login': (context) => const LoginPage(), // Login page route
+        '/': (BuildContext context)  => const HomePage(),
          '/background-replace': (context) => const BackgroundReplacePage(),
           '/background-removal': (context) => const BackgroundRemovalPage(), // Remove Background Page route
        '/restore-face': (context) => const RestoreFacePage(), // Remove Background Page route
@@ -55,633 +54,13 @@ class MyApp extends StatelessWidget {
        '/img2img': (context) => const Img2ImgPage(), // Remove Background Page route
         '/txt2vid': (context) => const Txt2VidPage(), // Remove Background Page route
        '/img2vid': (context) => const Img2VidPage(), // Remove Background Page route
-      '/home': (BuildContext context)  => const HomePage(),
+      
        '/settings': (context) => const SettingsPage(),
       },
        );
   }
 }
 
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
-  
-
-  @override
-  State<LoginPage> createState() => _LoginPageState();
-}
-
-class _LoginPageState extends State<LoginPage> with WidgetsBindingObserver, RouteAware {
-
-  bool isPolling = false; // Track polling state
-bool isLaunchingBrowser = false;
-late Completer<bool> _callbackCompleter; // Completer to control callback flow
-  String? _callbackId;
-  bool isLoading = false;
-
-  Timer? _pollingTimer; // Timer for polling
-
-  Timer? _refreshTimer; // Timer for callback refresh
-  final ApiService apiService = ApiService(); // Create instance
-  @override
-  void initState() {
-    super.initState();
-  _callbackCompleter = Completer<bool>();
-  _initializeLoginFlow();
-  }
-  
-@override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    routeObserver.subscribe(this, ModalRoute.of(context)!);
-  }
-   Future<void> _initializeLoginFlow() async {
-
-    _checkLoginStatus();
-    final callbackId = await _registerCallback();
-      if (mounted) {
-    setState(() {
-      _callbackId = callbackId;
-
-    });
-      }
-    if (_callbackId != null && _callbackId != '0') {
-      _startRefreshCallback();
-      
-    }
-  }
-@override
-void dispose() {
- if (mounted) {
-  scaffoldMessengerKey.currentState?.hideCurrentSnackBar();
-  scaffoldMessengerKey.currentState?.hideCurrentMaterialBanner(); // Clear any remaining SnackBars
-  }  // Clear Material Banners
-  _pollingTimer?.cancel();
-  _refreshTimer?.cancel();
-  _callbackCompleter.complete(false); 
-  WidgetsBinding.instance.removeObserver(this);
-  routeObserver.unsubscribe(this);
-  
-  super.dispose();
-}
-
- @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-      if (state == AppLifecycleState.paused && !isLaunchingBrowser) {
-    _stopPolling();
-
-    _stopRefreshCallback();
-    _stopCallbackRegistration(); // Stop callback registration
-  } else if (state == AppLifecycleState.resumed) {
-    if (_callbackId == null || _callbackId == '0') {
-      _startCallbackRegistration(); // Restart registration
-    }
-    if (_callbackId != null && _callbackId != '0') {
-      _startRefreshCallback(); // Resume refresh on resume
-    }
-      if (isLaunchingBrowser) {
-        // Reset the browser launch flag
-        isLaunchingBrowser = false;
-        _stopPolling();
-      } else {
-        // Resume polling if necessary
-        _stopPolling();
-      }
-    }
-  }
- @override
-  void didPushNext() {
-    _stopPolling();
-    _stopRefreshCallback();
-    _stopCallbackRegistration();
-  }
-
-  @override
-  void didPopNext() {
-    if (_callbackId == null || _callbackId == '0') {
-      _startCallbackRegistration();
-    }
-    _startPolling();
-    _startRefreshCallback();
-  }
-
-Future<void> _startCallbackRegistration() async {
-  _callbackCompleter = Completer<bool>(); // Reset the completer
-  await _registerCallback();
-}
-void _stopRefreshCallback() {
-  _refreshTimer?.cancel();
-  _refreshTimer = null;
-}
-void _stopCallbackRegistration() {
-  _callbackCompleter.complete(false); // Cancel ongoing registration attempts
-}
-Future<void> _startRefreshCallback() async {
-  _refreshTimer = Timer.periodic(const Duration(minutes: 5), (timer) async {
-    if (!mounted) return; // Ensure widget is still active
-    try {
-      final response = await apiService.refreshCallback(_callbackId!);
-      if (response.statusCode == 200) {
-      } else {
-      }
-    } catch (e) {
-
-    }
-  });
-}
-
- void _startPolling() {
-  if (isPolling) {
-    return; // Avoid multiple polling instances
-  }
-
-  isPolling = true;
-
-  _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
-    
-    try {
-      final status = await apiService.checkAuthStatus(_callbackId!);
-
-      if (status == 'success') {
-        final token = await apiService.fetchToken(_callbackId!);
-        if (token != null) {
-          _stopPolling(); // Stop polling on success
-          await apiService.saveToken(token);
-          if (mounted) _navigateToHomePage();
-        }
-      }
-    } catch (e) {
- 
-      _stopPolling(); // Ensure polling stops on error
-    }
-  });
-}
-
-Future<void> _loginWithApple() async {
-    try {
-      // Request Apple ID Credential
-      final credential = await SignInWithApple.getAppleIDCredential(
-        scopes: [
-          AppleIDAuthorizationScopes.email,
-          AppleIDAuthorizationScopes.fullName,
-        ],
-      );
-
-      // Send the `identityToken` to the backend
-      final success = await _sendAppleTokenToBackend(credential.identityToken);
-      if (success) {
-        _navigateToHomePage(); // Navigate to home page on successful login
-      } else {
-      // Retry if the first attempt failed
-      final success = await _sendAppleTokenToBackend(credential.identityToken);
-
-      if (success) {
-        _navigateToHomePage();
-      } else {
-      }
-    }
-  } catch (e) {
-  }
-}
-  Future<bool> _sendAppleTokenToBackend(String? identityToken) async {
-    if (identityToken == null) return false; // No token to send
-
-    final response = await http.post(
-      Uri.parse('https://www.aimaker.world/auth/apple/'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'token': identityToken}),
-    );
-
-   if (response.statusCode == 200) {
-
-    final responseData = jsonDecode(response.body);
-    final backendToken = responseData['token'];  // Get the token from the backend's response
-    if (backendToken != null) {
-      await apiService.saveToken(backendToken);  // Save token to shared preferences
-      return true;
-    }
-
-  }
-  return false;
-}
-
-void _stopPolling() {
-  if (!isPolling) return; // Avoid unnecessary calls
-
-
-  isPolling = false;
-  _pollingTimer?.cancel();
-  _pollingTimer = null;
-}
-
-
-
-Future<String> _registerCallback() async {
-  final String deviceIp = await _getDeviceIp();
-  
-  // Generate the timestamp
-  final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-
-  // Embed both the IP and timestamp directly in the URL
-  final String callbackUrl = 'http://$deviceIp-$timestamp:5000/auth_callback';
-
-  String? state;
-
-  
-
-  while (state == null || state == '0') {
-   
-
-    try {
- 
-      final response = await http.post(
-        Uri.parse('https://www.aimaker.world/register/callback/'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'callback_url': callbackUrl}),
-      );
-      
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        state = data['state'];
-
-        if (state != null && state != '0') {
-          return state; // Return the valid state immediately
-        }
-      } else {
-      }
-    } catch (e) {
-    }
-
-    // Wait 2 seconds before trying again
-    await Future.delayed(const Duration(seconds: 30));
-  }
-
-  // This point will never be reached since the loop only exits on success
-  return state ;
-}
-
-
-  Future<String> _getDeviceIp() async {
-    try {
-      final response = await http.get(Uri.parse('https://www.aimaker.world/ip'));
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['ip'] ?? '127.0.0.1';
-      } else {
-      
-      }
-    } catch (e) {
-   
-    }
-    return '127.0.0.1'; // Fallback to localhost
-  }
-
-
-  Future<void> _checkLoginStatus() async {
-    if (!mounted) return;
-      if (mounted) {
-    setState(() {
-      isLoading = true;
-    });
-      }
-    try {
-      final isLoggedIn = await apiService.isLoggedIn();
-      if (isLoggedIn && mounted) {
-        _navigateToHomePage();
-      } else if (mounted) {
-setState(() {
-      _callbackId = null;
-    });
-    
-      }
-    } catch (e) {
-      if (mounted) {
-        _showMessage('Could not login, Please try again.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-      }
-    }
-  }
-
-  void _navigateToHomePage() {
-    if (mounted) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const HomePage(), // Pass instance
-        ),
-      );
-    }
-  }
-
-  void _showMessage(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    }
-  }
-
-  Future<void> _loginWithGoogle() async {
-isLaunchingBrowser = true; // Mark that we're launching a browser
-
-    _startPolling(); // Start polling
-    
-    final String callbackId = _callbackId ?? '0';
-    final Uri googleAuthUrl = Uri.parse(
-        'https://www.aimaker.world/auth/?action=login_google&state=$callbackId');
- try {
-      if (await canLaunchUrl(googleAuthUrl)) {
-        await launchUrl(googleAuthUrl);
-      } else {
-         if (mounted) {
-        _showMessage('Could not launch the login page, Please try again.');
-         }
-      }
-    } catch (e) {
-       if (mounted) {
-      _showMessage('Could not launch the login page, Please try again.');
-       }
-    }
-  }
-
-  void _continueWithoutLogin() {
-    if (mounted) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const HomePage(), // Pass instance
-      ),
-    );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
-        children: [
-          // Background with scrolling images
-          const ScrollingImageBackground(),
-          // Foreground content - login UI
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset(
-                    'assets/images/logo.png',
-                    height: 150,
-                  ),
-                  const SizedBox(height: 40),
-                  if (isLoading)
-                    const CircularProgressIndicator()
-                  else
-                    Column(
-                      children: [
-                        ElevatedButton(
-                          onPressed: _loginWithGoogle,
-                          child: const Text('Login/Register with Google'),
-                        ),
-                        const SizedBox(height: 8),
-                        ElevatedButton(
-                          onPressed: _loginWithApple,
-                          child: const Text('Login/Register with Apple'),
-                        ),
-                        const SizedBox(height: 8),
-                       ElevatedButton(
-                          onPressed: _continueWithoutLogin,
-                          child: const Text(
-                            'Continue as guest',
-                            style: TextStyle(
-                              fontSize: 9,
-                            ),
-                          ),
-                        ),
-                        
-                      ],
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-class ScrollingImageBackground extends StatelessWidget {
-  const ScrollingImageBackground({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Row(
-      children: [
-        Expanded(
-          flex: 1,
-          child: ScrollingColumn(
-            imagePaths: [
-              'assets/images/2.png',
-              'assets/images/32.png',
-              'assets/images/23.png',
-              'assets/images/4.png',
-              'assets/images/1.gif',
-              'assets/images/18.png',
-              'assets/images/24.png',
-              'assets/images/9.png',
-              'assets/images/6.png',
-              'assets/images/25.png',
-              'assets/images/3.png',
-              'assets/images/27.png',
-              'assets/images/7.png',
-              'assets/images/33.png',
-              'assets/images/44.png',
-              'assets/images/4.gif',
-              'assets/images/41.png',
-              'assets/images/5.png',
-              'assets/images/8.gif',
-              'assets/images/8.png',
-              'assets/images/28.png',
-            ],
-            scrollDuration: Duration(seconds: 200),
-            delay: Duration.zero,
-          ),
-        ),
-        Expanded(
-          flex: 1,
-          child: ScrollingColumn(
-            imagePaths: [
-              'assets/images/9.gif',
-              'assets/images/20.png',
-              'assets/images/10.png',
-              'assets/images/1.png',
-              'assets/images/37.png',
-              'assets/images/31.png',
-              'assets/images/35.png',
-              'assets/images/19.png',
-              'assets/images/36.png',
-              'assets/images/39.png',
-              'assets/images/15.png',
-              'assets/images/29.png',
-              'assets/images/38.png',
-              'assets/images/34.png',
-              'assets/images/11.png',
-              'assets/images/16.png',
-              'assets/images/13.png',
-              'assets/images/2.gif',
-              'assets/images/14.png',
-              'assets/images/30.png',
-              'assets/images/17.png',
-              'assets/images/3.gif',
-              'assets/images/12.png',
-            ],
-            scrollDuration: Duration(seconds: 250),
-            delay: Duration(milliseconds: 500),
-          ),
-        ),
-        Expanded(
-          flex: 1,
-          child: ScrollingColumn(
-            imagePaths: [
-              'assets/images/10.gif',
-              'assets/images/49.png',
-              'assets/images/50.png',
-              'assets/images/7.gif',
-              'assets/images/43.png',
-              'assets/images/22.png',
-              'assets/images/18.png',
-              'assets/images/21.png',
-              'assets/images/48.png',
-              'assets/images/47.png',
-              'assets/images/26.png',
-              'assets/images/42.png',
-              'assets/images/6.gif',
-              'assets/images/40.png',
-              'assets/images/21.png',
-              'assets/images/44.png',
-              'assets/images/4.gif',
-              'assets/images/41.png',
-              'assets/images/19.png',
-              'assets/images/20.png',
-              'assets/images/45.png',
-              'assets/images/5.gif',
-              'assets/images/46.png',
-              'assets/images/11.gif',
-              'assets/images/22.png',
-            ],
-            scrollDuration: Duration(seconds: 300),
-            delay: Duration(seconds: 1),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class ScrollingColumn extends StatefulWidget {
-  final List<String> imagePaths;
-  final Duration scrollDuration;
-  final Duration delay;
-
-  const ScrollingColumn({
-    required this.imagePaths,
-    required this.scrollDuration,
-    required this.delay,
-    super.key,
-  });
-
-  @override
-  ScrollingColumnState createState() => ScrollingColumnState();
-}
-
-class ScrollingColumnState extends State<ScrollingColumn> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: widget.scrollDuration,
-      vsync: this,
-    )..addListener(() {
-        if (mounted) {
-          setState(() {});
-        }
-      });
-
-    // Start the animation after the specified delay
-    Future.delayed(widget.delay, () {
-      if (mounted) {
-        _controller.repeat();
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Calculate the total scrollable height based on image height, margin, and the number of images
-    const double imageHeight = 200.0; // Fixed height for each image
-    const double imageMargin = 4.0; // Margin above and below each image
-    final double totalScrollableHeight = (imageHeight + 2 * imageMargin) * widget.imagePaths.length;
-
-    // Offset for scrolling
-    final scrollOffset = _controller.value * totalScrollableHeight;
-    const double columnMargin = 8.0; // Margin between columns
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: columnMargin), // Margin between columns
-      child: ClipRect(
-        child: Stack(
-          children: [
-            Positioned(
-              top: -scrollOffset,
-              child: Column(
-                children: widget.imagePaths.map((path) {
-                  return Container(
-                    margin: const EdgeInsets.symmetric(vertical: imageMargin), // Adds a margin around each image
-                    width: MediaQuery.of(context).size.width / 3,
-                    height: imageHeight,
-                    child: Image.asset(
-                      path,
-                      fit: BoxFit.cover,
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            Positioned(
-              top: totalScrollableHeight - scrollOffset,
-              child: Column(
-                children: widget.imagePaths.map((path) {
-                  return Container(
-                    margin: const EdgeInsets.symmetric(vertical: imageMargin), // Adds a margin around each image
-                    width: MediaQuery.of(context).size.width / 3,
-                    height: imageHeight,
-                    child: Image.asset(
-                      path,
-                      fit: BoxFit.cover,
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 bool _isCelebrationActive = false;
 
 void _showCelebrationWidget(BuildContext context) {
@@ -741,8 +120,18 @@ class HomePage extends StatefulWidget {
   HomePageState createState() => HomePageState();
 }
 
-class HomePageState extends State<HomePage> with RouteAware {
+class HomePageState extends State<HomePage> with WidgetsBindingObserver, RouteAware {
   
+
+  bool isPolling = false; // Track polling state
+bool isLaunchingBrowser = false;
+late Completer<bool> _callbackCompleter; // Completer to control callback flow
+  String? _callbackId;
+  bool isLoading = false;
+
+  Timer? _pollingTimer; // Timer for polling
+
+  Timer? _refreshTimer; // Timer for callback refresh
   final ApiService apiService = ApiService(); // Create instance
 
 int? credits;
@@ -750,7 +139,8 @@ int? credits;
   @override
   void initState() {
     super.initState();
-     
+      _callbackCompleter = Completer<bool>();
+  _initializeLoginFlow();
       _initializeInAppPurchaseListener();
     _fetchAndSetCredits(); // Fetch credits on initialization
   }
@@ -760,12 +150,60 @@ int? credits;
     super.didChangeDependencies();
     routeObserver.subscribe(this, ModalRoute.of(context)!);
   }
-@override
-  void didPopNext() {
-    // This method is called when the user returns to this page.
-   
-    _fetchAndSetCredits(); // Reload credits
+  
+  
+ @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+      if (state == AppLifecycleState.paused && !isLaunchingBrowser) {
+    _stopPolling();
+
+    _stopRefreshCallback();
+    _stopCallbackRegistration(); // Stop callback registration
+  } else if (state == AppLifecycleState.resumed) {
+    if (_callbackId == null || _callbackId == '0') {
+      _startCallbackRegistration(); // Restart registration
+    }
+    if (_callbackId != null && _callbackId != '0') {
+      _startRefreshCallback(); // Resume refresh on resume
+    }
+      if (isLaunchingBrowser) {
+        // Reset the browser launch flag
+        isLaunchingBrowser = false;
+        _stopPolling();
+      } else {
+        // Resume polling if necessary
+        _stopPolling();
+      }
+    }
   }
+ @override
+  void didPushNext() {
+    _stopPolling();
+    _stopRefreshCallback();
+    _stopCallbackRegistration();
+  }
+ @override
+  void didPopNext() {
+    if (_callbackId == null || _callbackId == '0') {
+      _startCallbackRegistration();
+    }
+    
+    _fetchAndSetCredits(); // Reload credits
+    _startPolling();
+    _startRefreshCallback();
+  }
+Future<void> _startCallbackRegistration() async {
+  _callbackCompleter = Completer<bool>(); // Reset the completer
+  await _registerCallback();
+}
+void _stopRefreshCallback() {
+  _refreshTimer?.cancel();
+  _refreshTimer = null;
+}
+void _stopCallbackRegistration() {
+  _callbackCompleter.complete(false); // Cancel ongoing registration attempts
+}
+
   @override
   void dispose() {
  if (mounted) {
@@ -787,6 +225,197 @@ int? credits;
     }
   }
 
+Future<void> _startRefreshCallback() async {
+  _refreshTimer = Timer.periodic(const Duration(minutes: 5), (timer) async {
+    if (!mounted) return; // Ensure widget is still active
+    try {
+      final response = await apiService.refreshCallback(_callbackId!);
+      if (response.statusCode == 200) {
+      } else {
+      }
+    } catch (e) {
+
+    }
+  });
+}
+
+ void _startPolling() {
+  if (isPolling) {
+    return; // Avoid multiple polling instances
+  }
+
+  isPolling = true;
+
+  _pollingTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+    
+    try {
+      final status = await apiService.checkAuthStatus(_callbackId!);
+
+      if (status == 'success') {
+        final token = await apiService.fetchToken(_callbackId!);
+        if (token != null) {
+          _stopPolling(); // Stop polling on success
+          await apiService.saveToken(token);
+        }
+      }
+    } catch (e) {
+ 
+      _stopPolling(); // Ensure polling stops on error
+    }
+  });
+}
+
+
+void _stopPolling() {
+  if (!isPolling) return; // Avoid unnecessary calls
+
+
+  isPolling = false;
+  _pollingTimer?.cancel();
+  _pollingTimer = null;
+}
+
+ Future<void> _initializeLoginFlow() async {
+
+    _checkLoginStatus();
+    final callbackId = await _registerCallback();
+      if (mounted) {
+    setState(() {
+      _callbackId = callbackId;
+
+    });
+      }
+    if (_callbackId != null && _callbackId != '0') {
+      _startRefreshCallback();
+      
+    }
+  }
+
+  void _showMessage(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+    Future<String> _getDeviceIp() async {
+    try {
+      final response = await http.get(Uri.parse('https://www.aimaker.world/ip'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['ip'] ?? '127.0.0.1';
+      } else {
+      
+      }
+    } catch (e) {
+   
+    }
+    return '127.0.0.1'; // Fallback to localhost
+  }
+Future<String> _registerCallback() async {
+  final String deviceIp = await _getDeviceIp();
+  
+  // Generate the timestamp
+  final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+
+  // Embed both the IP and timestamp directly in the URL
+  final String callbackUrl = 'http://$deviceIp-$timestamp:5000/auth_callback';
+
+  String? state;
+
+  
+
+  while (state == null || state == '0') {
+   
+
+    try {
+ 
+      final response = await http.post(
+        Uri.parse('https://www.aimaker.world/register/callback/'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'callback_url': callbackUrl}),
+      );
+      
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        state = data['state'];
+
+        if (state != null && state != '0') {
+          return state; // Return the valid state immediately
+        }
+      } else {
+      }
+    } catch (e) {
+    }
+
+    // Wait 2 seconds before trying again
+    await Future.delayed(const Duration(seconds: 30));
+  }
+
+  // This point will never be reached since the loop only exits on success
+  return state ;
+}
+
+
+
+  Future<void> _checkLoginStatus() async {
+    if (!mounted) return;
+      if (mounted) {
+    setState(() {
+      isLoading = true;
+    });
+      }
+    try {
+      final isLoggedIn = await apiService.isLoggedIn();
+      if (isLoggedIn && mounted) {
+      
+      } else if (mounted) {
+setState(() {
+      _callbackId = null;
+    });
+    
+      }
+    } catch (e) {
+      if (mounted) {
+        _showMessage('Could not login, Please try again.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+
+
+
+  Future<void> _loginWithGoogle() async {
+isLaunchingBrowser = true; // Mark that we're launching a browser
+
+    _startPolling(); // Start polling
+    
+    final String callbackId = _callbackId ?? '0';
+    final Uri googleAuthUrl = Uri.parse(
+        'https://www.aimaker.world/auth/?action=login_google&state=$callbackId');
+ try {
+      if (await canLaunchUrl(googleAuthUrl)) {
+        await launchUrl(googleAuthUrl);
+      } else {
+         if (mounted) {
+        _showMessage('Could not launch the login page, Please try again.');
+         }
+      }
+    } catch (e) {
+       if (mounted) {
+      _showMessage('Could not launch the login page, Please try again.');
+       }
+    }
+  }
+
+ 
   @override
   Widget build(BuildContext context,{bool isHomePage = true}) {
     return Scaffold(
@@ -1289,7 +918,7 @@ Future<bool> _sendReceiptToBackend(String receipt) async {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'login'),
       );
     },
   );
@@ -1329,7 +958,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -1337,16 +966,8 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       }
     } else {
-      final success = await apiService.loginWithToken();
-      if (success) {
-        if (context.mounted) {
-          _navigateToHomePage(context); // Navigate after login
-        }
-      } else {
-        if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
-        }
-      }
+      _loginWithGoogle();
+     
     }
   } catch (e) {
     if (context.mounted) {
@@ -1356,15 +977,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
 }
 
 
-void _navigateToLoginPage(BuildContext context) {
-  if (context.mounted) {
-  Navigator.pushAndRemoveUntil(
-    context,
-    MaterialPageRoute(builder: (context) => const LoginPage()),
-    (route) => false, // Removes all previous routes
-  );
-  }
-}
+
 
  void _navigateToHomePage(BuildContext context) {
   if (context.mounted) {
@@ -1446,9 +1059,7 @@ Future<bool> logout(BuildContext context) async {
     // Clear the token from storage
     await clearToken();
     // Ensure widget is still in the tree before navigating
-    if (context.mounted) {
-      _navigateToLoginPage(context);
-    }
+ 
     return true; // Successful logout
 
   } catch (e) {
@@ -1462,16 +1073,7 @@ Future<bool> logout(BuildContext context) async {
   }
 }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 
 void _showSnackBar(BuildContext context, String message) {
   if (context.mounted) {
@@ -1977,7 +1579,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -2046,23 +1648,14 @@ Widget _buildServiceTile(String title, String imagePath, BuildContext context, S
     }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -2077,7 +1670,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -3108,7 +2701,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -3175,23 +2768,14 @@ void _navigateToHomePage(BuildContext context) {
    }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -3206,7 +2790,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -4257,7 +3841,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -4326,23 +3910,14 @@ Widget _buildLogoutButton(BuildContext context) {
                 }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -4357,7 +3932,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -5456,7 +5031,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -5525,23 +5100,14 @@ Widget _buildLogoutButton(BuildContext context) {
                 }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -5556,7 +5122,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -6590,7 +6156,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -6660,23 +6226,14 @@ Widget _buildLogoutButton(BuildContext context) {
                 }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -6691,7 +6248,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -7756,7 +7313,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -7825,23 +7382,14 @@ Widget _buildLogoutButton(BuildContext context) {
                 }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -7856,7 +7404,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -9560,7 +9108,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -9630,23 +9178,14 @@ Widget _buildLogoutButton(BuildContext context) {
                 }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -9661,7 +9200,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -10935,7 +10474,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -11003,23 +10542,14 @@ Widget _buildLogoutButton(BuildContext context) {
     }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -11034,7 +10564,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -12383,7 +11913,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -12451,23 +11981,14 @@ Widget _buildLogoutButton(BuildContext context) {
     }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -12482,7 +12003,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
@@ -13767,7 +13288,7 @@ Widget _buildLogoutButton(BuildContext context) {
           ),
         ),
         onPressed: () async => _handleLoginOrLogout(context, isLoggedIn),
-        child: Text(isLoggedIn ? 'Logout' : 'Login'),
+        child: Text(isLoggedIn ? 'Logout' : 'home'),
       );
     },
   );
@@ -13835,23 +13356,14 @@ Widget _buildLogoutButton(BuildContext context) {
     }
   }
 
-void _navigateToLoginPage(BuildContext context) {
-  // Ensure widget is still mounted before navigating
-  if (context.mounted) {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const LoginPage()),
-      (route) => false, // Remove all routes to prevent back navigation
-    );
-  }
-}
+
 Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
   try {
     if (isLoggedIn) {
       final success = await apiService.logout(context);
       if (success) {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after logout
+          _navigateToHomePage(context); // Navigate after logout
         }
       } else {
         if (context.mounted) {
@@ -13866,7 +13378,7 @@ Future<void> _handleLoginOrLogout(BuildContext context, bool isLoggedIn) async {
         }
       } else {
         if (context.mounted) {
-          _navigateToLoginPage(context); // Navigate after not login
+          _navigateToHomePage(context); // Navigate after not login
         }
       }
     }
